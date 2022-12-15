@@ -19,12 +19,19 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
     float maxSpeed = 15; 
     float gravity = -9.81f / 8f; 
     public AudioClip[] clips;
-    public Image image; 
-    CreatureStats stats = new CreatureStats(100, 10, 10, 10);
+
+    public Image hpImage;
+    public Image stamImage;
+    public Image manaImage;
+    public Image expImage; 
+
+    CreatureStats stats = new CreatureStats(100, 10, 10, 10, 1000);
     public Transform parentTransform;
     bool attackAnimation;
     public DamageNumber hurt;
-    public DamageNumber regen; 
+    public DamageNumber regen;
+    public DamageNumber exp;
+
     float flinchSum = 0;
 
     float sitDamageMultiplier = 1; 
@@ -46,22 +53,28 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
     public Transform leftHandTransform;
     public Transform rightHandTransform;
 
+    public Transform sword; 
+
     public Transform bow;
     //Transform fletchPoint;
     public LineRenderer shotPathRenderer; 
     bool bowLocked;
     public GameObject arrow;
     public Transform chest; 
-
     GameObject currentArrow;
 
-    Quaternion savedChestRotation; 
+    public TwoBoneIKConstraint leftHandConstraint;
+    public TwoBoneIKConstraint rightHandConstraint;
 
+
+    float countingStamina; 
+
+
+    int weaponIndex = 0; // 0 = melee, 1 = bow
  
     // Start is called before the first frame update
     void Start()
     {
-
         shotPathRenderer = Instantiate(shotPathRenderer);
         shotPathRenderer.enabled = false; 
 
@@ -76,11 +89,7 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
         source = GetComponent<AudioSource>();
 
         guardPoint.position = transform.position + Vector3.forward; 
-
     }
-
-
- 
 
     // Update is called once per frame
     void Update()
@@ -88,17 +97,37 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
 
         if (anim.GetBool("dead"))
             return;
-            
+
+
+
+        if (Input.GetAxis("Submit") > 0)
+        {
+            anim.SetBool("sit", true); 
+        
+        }
+
+
         if (Input.GetAxis("Fire3") > 0)
         {
-            anim.SetBool("range_attack", true);
-            if (bowLocked)
-                anim.speed = 0f;
-            
+            if (stats.currentStam > 0)
+            {
+                leftHandConstraint.weight = 0;
+                rightHandConstraint.weight = 0;
+
+                if (weaponIndex == 0)
+                {
+                    bow.gameObject.SetActive(true);
+                    sword.gameObject.SetActive(false);
+                    weaponIndex = 1;
+                }
+                anim.SetBool("range_attack", true);
+                if (bowLocked)
+                    anim.speed = 0f;
+            }
         }
         else if (bowLocked)
         {
-            chest.rotation = Quaternion.Euler(0, -90, 0);  
+            chest.localRotation = Quaternion.Euler(0, 0, 0);  
             bowLocked = false;
             currentArrow.GetComponent<ArrowScript>().InitiateFlight(currentArrow.transform.position,
                 currentArrow.transform.position + transform.right * 100);
@@ -110,18 +139,6 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
             anim.speed = 1f;
             anim.SetBool("range_attack", false);
             rig.weight = 0; 
-        }
-
-        if (anim.GetBool("sit") && stats.currentHp < stats.maxHp)
-        {
-            hpRegenSum += Time.deltaTime * stats.hpRegenPerSecond;
-            if (hpRegenSum >= 2)
-            {
-                hpRegenSum = 0;
-                DamageNumber damageNumber = regen.Spawn(transform.position, 2);   
-                stats.currentHp += 2; 
-                image.GetComponent<RectTransform>().localScale = new Vector3(stats.currentHp / stats.maxHp, 1, 1);
-            }
         }
 
         float moveX = Input.GetAxis("Horizontal") * Time.deltaTime * 100;
@@ -142,9 +159,9 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
         Vector3 moveForward = moveY * parentTransform.forward;
         Vector3 finalMove = moveForward + velocity;
 
-        if (!bowLocked)
+        if (!bowLocked) // move normally
         {
-            controller.Move(finalMove);
+            controller.Move(finalMove);              
             parentTransform.Rotate(new Vector3(0, moveX, 0));
         }
         else // bow is locked, adjust aim with movement instead
@@ -157,15 +174,16 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
                 currentArrow.transform.position - currentArrow.transform.up*100 };
 
             shotPathRenderer.SetPositions(positions);
-
-            chest.Rotate(transform.right, moveY*3);
-            chest.Rotate(transform.up, moveX*2);
-
             
+            chest.Rotate(Vector3.forward, moveY*5);
+            chest.Rotate(Vector3.up, moveX*2);         
         }
 
+        if (rig.weight > 0)
+            rig.weight -= Time.deltaTime*2; 
 
         float jump = Input.GetAxis("Jump");
+
         if (jump > 0)
         {
             anim.SetBool("jump", true);
@@ -184,16 +202,26 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
 
         if (Input.GetAxis("Fire1") > 0 && Input.GetAxis("Fire2") == 0)
         {
-            anim.SetBool("attack", true);
+            if (stats.currentStam > 0)
+            {
+                if (weaponIndex == 1)
+                {
+                    bow.gameObject.SetActive(false);
+                    sword.gameObject.SetActive(true);
+                    weaponIndex = 0;
+                }
+                anim.SetBool("attack", true);
+            }
+            else
+            {
+                anim.SetBool("attack", false);
+                EndAttack();
+            }
         }
         else 
             anim.SetBool("attack", false);
 
-
-        //if (rig.weight > 0)
-        //    rig.weight -= Time.deltaTime * 4;
-
-        if (Input.GetAxis("Fire2") > 0 && !attackAnimation)
+        if (weaponIndex==0 && Input.GetAxis("Fire2") > 0 && !attackAnimation)
         {
             blocking = true;
             guardPoint.position = (transform.position + parentTransform.forward*1.5f);
@@ -202,15 +230,44 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
             leftHandEffector.rotation = guardPoint.rotation;
             rightHandEffector.rotation = guardPoint.rotation;
             rig.weight = 1;
+            leftHandConstraint.weight = 1;
+            rightHandConstraint.weight = 1; 
         }
-        else blocking = false; 
+        else 
+            blocking = false;
 
-
+        RegenHealth();
+        RegenStamina();
         HandleCombatLayers(); 
-
-
     }
 
+
+    void RegenStamina()
+    {
+        if (stats.currentStam < stats.maxStam)
+            countingStamina += Time.deltaTime * 2;
+        if (countingStamina > 5)
+        {
+            countingStamina = 0;
+            stats.IncreaseStamina(5); 
+            stamImage.GetComponent<RectTransform>().localScale = new Vector3(stats.currentStam / stats.maxStam, 1, 1);
+        }
+    }
+
+    void RegenHealth()
+    {
+        if (anim.GetBool("sit") && stats.currentHp < stats.maxHp)
+        {
+            hpRegenSum += Time.deltaTime * stats.hpRegenPerSecond;
+            if (hpRegenSum >= 2)
+            {
+                hpRegenSum = 0;
+                DamageNumber damageNumber = regen.Spawn(transform.position, 2);
+                stats.currentHp += 2;
+                hpImage.GetComponent<RectTransform>().localScale = new Vector3(stats.currentHp / stats.maxHp, 1, 1);
+            }
+        }
+    }
     void HandleCombatLayers()
     {
 
@@ -274,6 +331,9 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
         currentArrow.transform.parent = bow.transform;
         currentArrow.transform.localRotation = Quaternion.Euler(156, -21, 191);
         currentArrow.transform.localPosition = new Vector3(1.17f, 2.4f, -0.88f);
+
+        stats.ReduceStamina(10);
+        stamImage.GetComponent<RectTransform>().localScale = new Vector3(stats.currentStam / stats.maxStam, 1, 1);
     }
 
 
@@ -282,8 +342,7 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
     {
         source.volume = 2; 
         source.clip = clips[6];
-        source.Play(); 
-    
+        source.Play();  
     }
 
     void OnFlinch()
@@ -311,8 +370,6 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
         ParticleSystem block = Instantiate(blockParticles).GetComponent<ParticleSystem>();
         block.transform.position = transform.position;
         block.Play();
-
-
     }
 
     void DamageEffect(Vector3 damageLocation)
@@ -320,14 +377,15 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
         ParticleSystem currentSplat = Instantiate(bloodSplat).GetComponent<ParticleSystem>();
         currentSplat.transform.position = transform.position;
         currentSplat.Play();
-
     }
 
     public void TakeDamage(float damage, Vector3 hitLocation)
     {
 
-        if (blocking)
+        if (blocking && stats.currentStam > 0)
         {
+            stats.ReduceStamina(2);
+            stamImage.GetComponent<RectTransform>().localScale = new Vector3(stats.currentStam / stats.maxStam, 1, 1);
 
             BlockEffect(hitLocation); 
 
@@ -338,6 +396,8 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
             rightHandEffector.rotation = guardPoint.rotation;
             rig.weight = 1;
 
+
+
         }
         else
         {
@@ -345,22 +405,23 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
 
             DamageEffect(hitLocation); 
 
-            DamageNumber damageNumber = hurt.Spawn(transform.position, damage);
+            hurt.Spawn(transform.position, damage);
 
             float damagePercHp = damage / stats.currentHp;
 
             if (damagePercHp < 0.25)
-                damagePercHp = 0.25f; // cap it at 0.15
+                damagePercHp = 0.25f; 
 
             flinchSum += damagePercHp;
 
             attackAnimation = false;
             bool dead = stats.ApplyDamage(damage);
 
-            image.GetComponent<RectTransform>().localScale = new Vector3(stats.currentHp / stats.maxHp, 1, 1);
+            hpImage.GetComponent<RectTransform>().localScale = new Vector3(stats.currentHp / stats.maxHp, 1, 1);
 
             if (dead)
             {
+                anim.speed = 1; 
                 OnDeath();
             }
             else
@@ -392,11 +453,14 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
 
     void StartAttack()
     {
+        stats.ReduceStamina(25); 
+        stamImage.GetComponent<RectTransform>().localScale = new Vector3(stats.currentStam / stats.maxStam, 1, 1);
         attackAnimation = true; 
     }
 
     void EndAttack()
     {
+
         attackAnimation = false; 
     
     }
@@ -411,6 +475,17 @@ public class ThirdPersonController : MonoBehaviour, HittableInterface
     {
 
         sitDamageMultiplier = 2; 
+
+    }
+
+    public void ApplyExp(float exp)
+    {
+
+        DamageNumber damageNumber = this.exp.Spawn(transform.position, exp);
+
+        stats.AddExp(exp);
+        expImage.GetComponent<RectTransform>().localScale = 
+            new Vector3(stats.currentExp / stats.levelExpThresholds[stats.level], 1, 1);
 
     }
 }

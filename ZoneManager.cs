@@ -13,12 +13,17 @@ public static class ZoneManager
 
     public static List<EnemyScript> zoneEnemies = new List<EnemyScript>();
 
+  
+
+
     public static void NotifyPlayerDeath()
     {
         foreach (EnemyScript enemy in zoneEnemies)
             enemy.NotifyAttackTargetDied(); 
     
     }
+
+
 
       
 }

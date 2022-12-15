@@ -2,6 +2,7 @@
 using UnityEngine;
 using UnityEngine.AI;
 using DamageNumbersPro;
+using System.Collections.Generic;  
 
 public class EnemyScript : MonoBehaviour, HittableInterface
 {
@@ -12,7 +13,7 @@ public class EnemyScript : MonoBehaviour, HittableInterface
     AudioSource source;
     public AudioClip[] clips; // 0=att, 1=die, 2=hit, 3=idle, 4=satt
     public Transform hpbar; 
-    CreatureStats stats = new CreatureStats(15, 5, 10, 10);
+    CreatureStats stats = new CreatureStats(35, 5, 10, 10, 85);
     bool alreadyDead;
     bool aggro;
     Transform aggroTransform;
@@ -21,13 +22,18 @@ public class EnemyScript : MonoBehaviour, HittableInterface
     BoxCollider weaponCollider;
     CapsuleCollider bodyCollider;
 
+    List<EnemyScript> linkedMobs = new List<EnemyScript>(); 
+
     public DamageNumber hurt;
 
+    Transform playerTransform;
 
-
+    public LayerMask enemiesOnly; 
 
     void Start()
     {
+        playerTransform = GameObject.Find("elm").GetComponent<Transform>(); 
+
         ZoneManager.zoneEnemies.Add(this); 
 
         proximitySphereCollider = GetComponentInChildren<SphereCollider>();
@@ -43,10 +49,17 @@ public class EnemyScript : MonoBehaviour, HittableInterface
 
     void Update()
     {
-        anim.SetFloat("speed", agent.velocity.magnitude); 
+
+
+        //if(wandering)
+            //agent.destination = Ra
+
+        anim.SetFloat("speed", agent.velocity.magnitude);
 
         if (aggro)
-            agent.destination = aggroTransform.position; 
+            agent.destination = aggroTransform.position;
+      //  else
+      //      agent.destination = walkDest; 
     }
 
 
@@ -58,20 +71,35 @@ public class EnemyScript : MonoBehaviour, HittableInterface
         return attackLocation - offset;  
     }
 
-    /*
-    private void OnTriggerEnter(Collider other)
+  
+    public void Aggro(Transform aggroTransform, bool recursiveAggro)
     {
-        if (other.tag == "PlayerWeapon")
+
+        if (recursiveAggro)
         {
-            anim.SetBool("hit", true); 
+            RaycastHit[] hits = Physics.SphereCastAll(
+                transform.position, 40, transform.up,  Mathf.Infinity, enemiesOnly);
+
+            if (hits != null)
+            {
+                foreach (RaycastHit hit in hits)
+                {
+                    Debug.Log(hit.transform.name); 
+                    if (hit.transform.position != transform.position)
+                        hit.transform.gameObject.GetComponent<EnemyScript>().Aggro(aggroTransform, false); 
+                }
+            
+            }
         }
-    }
-    */
-    public void Aggro(Transform aggroTransform)
-    {
+
         this.aggroTransform = aggroTransform; 
         agent.destination = aggroTransform.position;
         aggro = true;   
+    }
+
+    public void AddLinkedMob(EnemyScript mob)
+    {
+        linkedMobs.Add(mob);
     }
 
     public void ResumeChase()
@@ -86,8 +114,11 @@ public class EnemyScript : MonoBehaviour, HittableInterface
     
     public void Attack()
     {
-        anim.SetBool("attack", true); 
-        agent.isStopped = true;  
+        if (agent.isActiveAndEnabled)
+        {
+            anim.SetBool("attack", true);
+            agent.isStopped = true;
+        }
     }
 
     void GetHit()
@@ -98,6 +129,8 @@ public class EnemyScript : MonoBehaviour, HittableInterface
     void OnFlinch()
     {
         anim.SetBool("hit", false);
+
+
 
     }
 
@@ -112,12 +145,19 @@ public class EnemyScript : MonoBehaviour, HittableInterface
 
         proximitySphereCollider.enabled = false;
         weaponCollider.enabled = false;
-        bodyCollider.enabled = false; 
+        bodyCollider.enabled = false;
+
+
+        playerTransform.gameObject.GetComponentInChildren<ThirdPersonController>().ApplyExp(stats.expValue); 
+
 
     }
 
     public void TakeDamage(float damage, Vector3 hitLocation)
     {
+
+        if (!aggro)
+            Aggro(playerTransform, true); 
 
         bool killingShot = stats.ApplyDamage(damage);
 
@@ -149,10 +189,15 @@ public class EnemyScript : MonoBehaviour, HittableInterface
         source.Play();
     }
 
+    public void SetStartDestination(Vector3 startDest)
+    {
+
+        //agent.destination = walkDest; 
+    }
+
     public void NotifyAttackTargetDied()
     {
         anim.SetBool("attack", false);
-        Debug.Log("stopping attak"); 
     }
 
     public float DamageDone()

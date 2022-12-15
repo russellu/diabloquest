@@ -18,7 +18,7 @@ public class RangeSensorScript : MonoBehaviour
         if (other.tag == "Player")
         {
             Debug.Log("player trigger entered");
-            parent.Aggro(other.transform); 
+            parent.Aggro(other.transform, true); 
         }
 
 
